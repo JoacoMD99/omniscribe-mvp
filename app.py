@@ -3,7 +3,7 @@ import io
 import time
 import zipfile
 from pathlib import Path
-import config
+import app_config
 from scraper import OmniScraper
 
 # App Configuration

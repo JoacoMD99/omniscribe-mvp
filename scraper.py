@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-import config
+import app_config
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi, IpBlocked
 from groq import Groq
