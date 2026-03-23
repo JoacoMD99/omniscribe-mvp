@@ -40,5 +40,8 @@ A continuación, se detalla por qué cada *skill* es vital para el éxito del pr
 17. **`test-automator.md`**: Automatización de pruebas para integraciones continuas.
 18. **`testing-patterns.md`**: Patrones arquitectónicos generales para garantizar la testabilidad del código desde su diseño.
 
+### 🌳 DevOps & Control de Versiones
+19. **`git-advanced-workflows.md`**: Flujos de trabajo avanzados de Git (branching, rebasing, resolución de conflictos) garantizando el manejo automático y perfecto de comandos.
+
 ---
 > **Aviso de Seguridad:** Estos archivos son estrictamente de texto plano (Markdown) y sirven de *contexto* para el LLM. No existen scripts `.sh` ni `.bat` ejecutables en esta carpeta.

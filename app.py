@@ -203,6 +203,13 @@ def reset_all_inputs() -> None:
             st.session_state[key] = ""
         else:
             st.session_state[key] = ""
+            
+    # Reset playlist state
+    st.session_state.playlist_urls = []
+    st.session_state.is_processing = False
+    st.session_state.current_idx = 0
+    if "playlist_url_input" in st.session_state:
+        st.session_state["playlist_url_input"] = ""
 
 def main() -> None:
     # Session State Initialization
@@ -363,6 +370,8 @@ def main() -> None:
                         urls = scraper.get_playlist_videos(playlist_url_input.strip())
                         if urls:
                             st.session_state.playlist_urls = urls
+                            st.session_state.current_idx = 0
+                            st.session_state.is_processing = False
                         else:
                             st.session_state.playlist_urls = []
                             st.warning("⚠️ No se encontraron videos en esta playlist o la URL no es válida.")
@@ -373,15 +382,34 @@ def main() -> None:
         if st.session_state.playlist_urls:
             n = len(st.session_state.playlist_urls)
             st.info(f"✅ Se han detectado {n} videos en esta lista de reproducción.")
-
             st.markdown("<br>", unsafe_allow_html=True)
 
-            if st.button("🚀 Iniciar Extracción de Playlist", key="btn_playlist_extract", type="primary"):
+            # Controles de Ejecución
+            col_btn, col_spacer = st.columns([1, 2])
+            with col_btn:
+                if st.session_state.current_idx == 0 and not st.session_state.is_processing:
+                    if st.button("🚀 Iniciar Extracción de Playlist", key="btn_playlist_play", type="primary"):
+                        st.session_state.is_processing = True
+                        st.rerun()
+                elif st.session_state.is_processing:
+                    if st.button("⏸️ Pausar", key="btn_playlist_pause", type="secondary"):
+                        st.session_state.is_processing = False
+                        st.rerun()
+                elif not st.session_state.is_processing and 0 < st.session_state.current_idx < n:
+                    if st.button("▶️ Reanudar", key="btn_playlist_resume", type="primary"):
+                        st.session_state.is_processing = True
+                        st.rerun()
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+            # Execution Logic Loop
+            if st.session_state.is_processing:
                 try:
                     scraper = OmniScraper()
                 except Exception as e:
                     st.error(f"❌ Error de inicialización: {str(e)}")
-                    return
+                    st.session_state.is_processing = False
+                    st.rerun()
 
                 results = []
                 successful_files = []
@@ -389,9 +417,15 @@ def main() -> None:
                 error_count = 0
 
                 total = len(st.session_state.playlist_urls)
-                progress_bar = st.progress(0)
+                progress_bar = st.progress(st.session_state.current_idx / total)
 
-                for idx, url in enumerate(st.session_state.playlist_urls):
+                # Iterar desde el offset guardado
+                for idx in range(st.session_state.current_idx, total):
+                    # Comprobación de estado persistente antes de cada vuelta
+                    if not st.session_state.is_processing:
+                        st.stop()
+
+                    url = st.session_state.playlist_urls[idx]
                     current_num = idx + 1
 
                     with st.status(f"Procesando video {current_num} de {total}...", expanded=True) as status:
@@ -413,15 +447,21 @@ def main() -> None:
                             results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
                             error_count += 1
 
+                    # Update Offset
+                    st.session_state.current_idx = current_num
+
                     # Update shared Live Metrics
                     metric_total.metric("Total Procesados", current_num)
                     metric_success.metric("Éxitos ✅", success_count)
                     metric_error.metric("Fallos ❌", error_count)
                     progress_bar.progress(current_num / total)
 
-                    # Pausa proactiva entre videos para evitar IpBlocked de YouTube
                     if current_num < total:
                         time.sleep(2)
+                        
+                # Bucle terminado
+                st.session_state.is_processing = False
+                st.session_state.current_idx = 0
 
                 # Results Summary
                 st.markdown("### 📋 Resumen de Procesamiento")
