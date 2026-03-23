@@ -227,7 +227,7 @@ def main() -> None:
         st.markdown("OmniScribe es el motor de inteligencia de contenido para KAI Trades. Diseñado para automatizar la captura de conocimiento estratégico, permite procesar múltiples fuentes de video simultáneamente para alimentar modelos de IA especializados en trading y libertad financiera.")
         
         # Dynamic API Key Check
-        current_api_key = config.get_groq_api_key()
+        current_api_key = app_config.get_groq_api_key()
         status_color = "🟢" if current_api_key else "🟡"
         status_text = "Conectado" if current_api_key else "Sin configurar (.env)"
         st.markdown("---")
