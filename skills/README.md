@@ -28,5 +28,17 @@ A continuación, se detalla por qué cada *skill* es vital para el éxito del pr
 9. **`systematic-debugging.md`**: Metodología para aislar e investigar rápidamente cualquier error de red, falla en las descargas de YouTube o caídas de Groq, minimizando el tiempo de inactividad de OmniScribe.
 10. **`test-driven-development.md`**: Garantiza la confiabilidad del sistema. Dictamina que cualquier nueva característica de Streamlit o extracción se pruebe rigurosamente antes de usarse en producción.
 
+### 🎨 Frontend & UX/UI (SaaS Level)
+11. **`ui-ux-designer.md`**: Asegura que cualquier componente interactivo respete la ergonomía visual y heurísticas para usuarios finales.
+12. **`frontend-design.md`**: Define las directrices para implementar diseños adaptativos, limpios y "Theme-Agnostic" basados en Glassmorphism.
+13. **`ui-visual-validator.md`**: Habilidad analítica para asegurar que el contraste, los paddings y alineaciones cumplan estándares profesionales.
+14. **`senior-frontend.md`**: Eleva la calidad de la integración entre Streamlit y CSS puro (markdown injects), asegurando un código Frontend mantenible y escalable.
+
+### 🧪 Advanced Testing & QA
+15. **`python-testing-patterns.md`**: Provee las mejores prácticas para estructurar tests en Python (Pytest, Mocks, Fixtures).
+16. **`testing-qa.md`**: Guías de Quality Assurance para validar flujos completos y asegurar la cobertura del sistema.
+17. **`test-automator.md`**: Automatización de pruebas para integraciones continuas.
+18. **`testing-patterns.md`**: Patrones arquitectónicos generales para garantizar la testabilidad del código desde su diseño.
+
 ---
 > **Aviso de Seguridad:** Estos archivos son estrictamente de texto plano (Markdown) y sirven de *contexto* para el LLM. No existen scripts `.sh` ni `.bat` ejecutables en esta carpeta.

@@ -1,12 +1,13 @@
 import os
 import re
+import time
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 import config
 import yt_dlp
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, IpBlocked
 from groq import Groq
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
@@ -21,7 +22,7 @@ class OmniScraper:
     """
     
     def __init__(self, groq_api_key: Optional[str] = None) -> None:
-        self.api_key = groq_api_key or config.GROQ_API_KEY
+        self.api_key = groq_api_key or config.get_groq_api_key()
         if not self.api_key:
             logger.warning("GROQ_API_KEY not found. Fallback transcription will be unavailable.")
         
@@ -46,20 +47,49 @@ class OmniScraper:
         """
         Uses yt-dlp to extract title and basic info.
         """
+        # Robust regex to extract just the video ID and ignore playlist parameters
+        match = re.search(r"(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})", url)
+        clean_url = f"https://www.youtube.com/watch?v={match.group(1)}" if match else url
+
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
+            'noplaylist': True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(clean_url, download=False)
             if not info:
                 raise ValueError(f"Could not extract info from URL: {url}")
             return {
                 "title": info.get("title", "Unknown Title"),
-                "id": info.get("id"),
-                "duration": info.get("duration")
+                "id": info.get("id", match.group(1) if match else None),
+                "duration": info.get("duration"),
+                "clean_url": clean_url
             }
+
+    def get_playlist_videos(self, playlist_url: str) -> list[str]:
+        """
+        Extracts all individual video URLs from a playlist using yt-dlp.
+        """
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': 'in_playlist',
+            'noplaylist': False,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(playlist_url, download=False)
+            if not info or 'entries' not in info:
+                return []
+            
+            urls = []
+            for entry in info['entries']:
+                if entry.get('url'):
+                    urls.append(entry['url'])
+                elif entry.get('id'):
+                    urls.append(f"https://www.youtube.com/watch?v={entry['id']}")
+            return urls
 
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -83,6 +113,18 @@ class OmniScraper:
             )
         return str(response)
 
+    @staticmethod
+    def _find_ffmpeg() -> Optional[str]:
+        """Locates ffmpeg in PATH or known WinGet install location."""
+        import shutil
+        if shutil.which("ffmpeg"):
+            return None  # Already in PATH, yt-dlp will find it automatically
+        winget_path = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
+        for candidate in winget_path.glob("Gyan.FFmpeg*/**/bin"):
+            if (candidate / "ffmpeg.exe").exists():
+                return str(candidate)
+        return None
+
     def _download_audio(self, url: str, temp_file_path: str) -> str:
         """
         Downloads the audio stream in a compressed format (m4a).
@@ -97,6 +139,10 @@ class OmniScraper:
                 'preferredcodec': 'm4a',
             }],
         }
+        ffmpeg_location = self._find_ffmpeg()
+        if ffmpeg_location:
+            ydl_opts['ffmpeg_location'] = ffmpeg_location
+            logger.info(f"Using ffmpeg at: {ffmpeg_location}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
             
@@ -118,6 +164,7 @@ class OmniScraper:
             metadata = self.get_metadata(url)
             video_id = metadata["id"]
             title = metadata["title"]
+            clean_url = metadata.get("clean_url", url)
             logger.info(f"🚀 Starting process for: {title} ({video_id})")
 
             transcript_text: Optional[str] = None
@@ -143,12 +190,23 @@ class OmniScraper:
 
                 if selected_transcript:
                     logger.info(f"Selected transcript: {selected_transcript.language} (Auto-generated: {selected_transcript.is_generated})")
-                    raw_transcript = selected_transcript.fetch()
-                    transcript_text = " ".join([t.text for t in raw_transcript])
-                    logger.info("Official transcript retrieved successfully.")
+                    try:
+                        raw_transcript = selected_transcript.fetch()
+                        transcript_text = " ".join([t.text for t in raw_transcript])
+                        logger.info("Official transcript retrieved successfully.")
+                    except IpBlocked:
+                        if not self.client:
+                            raise RuntimeError(
+                                "YouTube bloqueó las requests de transcript (IpBlocked). "
+                                "No hay API Key de Groq configurada para el fallback de audio. "
+                                "Espera unos minutos antes de reintentar este video."
+                            )
+                        logger.warning("IpBlocked en fetch(). Intentando fallback de Groq...")
                 else:
                     logger.info("No suitable 'en' or 'es' transcript found (will fallback).")
-                    
+
+            except RuntimeError:
+                raise
             except Exception as e:
                 logger.info(f"Official transcript unavailable: {e} (will fallback).")
 
@@ -166,7 +224,7 @@ class OmniScraper:
                 
                 try:
                     # Download audio
-                    audio_file = self._download_audio(url, base_temp_name)
+                    audio_file = self._download_audio(clean_url, base_temp_name)
                     
                     if not os.path.exists(audio_file):
                         raise FileNotFoundError("Audio file download failed.")
@@ -187,6 +245,10 @@ class OmniScraper:
                     if audio_file and os.path.exists(audio_file):
                         os.remove(audio_file)
                         logger.info(f"Cleanup: Deleted temp audio file {audio_file}")
+                    # Also remove base temp file if postprocessor failed before returning path
+                    if os.path.exists(base_temp_name):
+                        os.remove(base_temp_name)
+                        logger.info(f"Cleanup: Deleted orphan temp file {base_temp_name}")
 
             # Process and Save results
             if transcript_text:
@@ -205,6 +267,8 @@ class OmniScraper:
 
             return None
 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"❌ Error processing {url}: {e}")
             return None
