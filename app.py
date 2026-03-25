@@ -201,24 +201,62 @@ def reset_all_inputs() -> None:
         key = f"url_input_{i}"
         if key in st.session_state:
             st.session_state[key] = ""
-        else:
-            st.session_state[key] = ""
             
     # Reset playlist state
     st.session_state.playlist_urls = []
     st.session_state.is_processing = False
     st.session_state.current_idx = 0
+    st.session_state.playlist_results = []
+    st.session_state.playlist_successful_files = []
+    st.session_state.playlist_success_count = 0
+    st.session_state.playlist_error_count = 0
+    
     if "playlist_url_input" in st.session_state:
         st.session_state["playlist_url_input"] = ""
 
+    # Reset batch state
+    st.session_state.batch_urls = []
+    st.session_state.batch_is_processing = False
+    st.session_state.batch_current_idx = 0
+    st.session_state.batch_results = []
+    st.session_state.batch_successful_files = []
+    st.session_state.batch_success_count = 0
+    st.session_state.batch_error_count = 0
+
 def main() -> None:
-    # Session State Initialization
+    # --- Session State Initialization ---
     if 'playlist_urls' not in st.session_state:
         st.session_state.playlist_urls = []
     if 'is_processing' not in st.session_state:
         st.session_state.is_processing = False
     if 'current_idx' not in st.session_state:
         st.session_state.current_idx = 0
+        
+    # Persistent memory for Playlist extraction
+    if 'playlist_results' not in st.session_state:
+        st.session_state.playlist_results = []
+    if 'playlist_successful_files' not in st.session_state:
+        st.session_state.playlist_successful_files = []
+    if 'playlist_success_count' not in st.session_state:
+        st.session_state.playlist_success_count = 0
+    if 'playlist_error_count' not in st.session_state:
+        st.session_state.playlist_error_count = 0
+
+    # Persistent memory for Batch extraction (Links Individuales)
+    if 'batch_urls' not in st.session_state:
+        st.session_state.batch_urls = []
+    if 'batch_is_processing' not in st.session_state:
+        st.session_state.batch_is_processing = False
+    if 'batch_current_idx' not in st.session_state:
+        st.session_state.batch_current_idx = 0
+    if 'batch_results' not in st.session_state:
+        st.session_state.batch_results = []
+    if 'batch_successful_files' not in st.session_state:
+        st.session_state.batch_successful_files = []
+    if 'batch_success_count' not in st.session_state:
+        st.session_state.batch_success_count = 0
+    if 'batch_error_count' not in st.session_state:
+        st.session_state.batch_error_count = 0
 
     # Sidebar
     with st.sidebar:
@@ -255,7 +293,7 @@ def main() -> None:
     metric_success = col2.empty()
     metric_error = col3.empty()
     
-    # Initialize empty scorecards
+    # Initialize empty scorecards (defaults overridden by active state below)
     metric_total.metric("Total Procesados", 0)
     metric_success.metric("Éxitos ✅", 0)
     metric_error.metric("Fallos ❌", 0)
@@ -281,77 +319,134 @@ def main() -> None:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Main Action
+        # Main Action (Initial Trigger)
         if st.button("🚀 Iniciar Extracción Masiva", key="btn_masiva"):
             if not valid_urls:
                 st.warning("⚠️ Por favor, ingresa al menos un link válido en la configuración de lote.")
-                return
-
-            # Initialize Scraper
-            try:
-                scraper = OmniScraper()
-            except Exception as e:
-                st.error(f"❌ Error de inicialización: {str(e)}")
-                return
-
-            results = []
-            successful_files = []
-            
-            success_count = 0
-            error_count = 0
-
-            progress_bar = st.progress(0)
-
-            for idx, url in enumerate(valid_urls):
-                current_num = idx + 1
-                total_num = len(valid_urls)
-                
-                with st.status(f"Procesando video {current_num} de {total_num}...", expanded=True) as status:
-                    st.write(f"Link: {url}")
-                    try:
-                        output_path = scraper.process_video(url)
-                        
-                        if output_path:
-                            status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
-                            results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
-                            successful_files.append(output_path)
-                            success_count += 1
-                        else:
-                            status.update(label=f"❌ Video {current_num} falló", state="error")
-                            results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                            error_count += 1
-                    
-                    except Exception as e:
-                        status.update(label=f"❌ Error crítico en video {current_num}", state="error")
-                        st.error(str(e))
-                        results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                        error_count += 1
-                
-                # Update Live Metrics
-                metric_total.metric("Total Procesados", current_num)
-                metric_success.metric("Éxitos ✅", success_count)
-                metric_error.metric("Fallos ❌", error_count)
-                
-                # Update overall progress
-                progress_bar.progress(current_num / total_num)
-
-            # Results Summary
-            st.markdown("### 📋 Resumen de Procesamiento")
-            st.dataframe(results, width="stretch")
-
-            # Download Action
-            if successful_files:
-                zip_data = create_zip_in_memory(successful_files)
-                st.success(f"🎉 ¡Extracción completada! Se generaron {len(successful_files)} archivos.")
-                st.download_button(
-                    label="📦 Descargar Paquete Completo (.zip)",
-                    data=zip_data,
-                    file_name="omniscribe_batch.zip",
-                    mime="application/zip",
-                    width="stretch"
-                )
             else:
-                st.error("❌ No se pudo extraer ningún video en este lote.")
+                st.session_state.batch_urls = valid_urls
+                st.session_state.batch_current_idx = 0
+                st.session_state.batch_is_processing = True
+                st.session_state.batch_results = []
+                st.session_state.batch_successful_files = []
+                st.session_state.batch_success_count = 0
+                st.session_state.batch_error_count = 0
+                st.rerun()
+
+        if st.session_state.batch_urls:
+            n = len(st.session_state.batch_urls)
+            st.info(f"✅ Se han detectado {n} videos para procesar en este lote.")
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Sync Metrics to Current Global State
+            metric_total.metric("Total Procesados", st.session_state.batch_current_idx)
+            metric_success.metric("Éxitos ✅", st.session_state.batch_success_count)
+            metric_error.metric("Fallos ❌", st.session_state.batch_error_count)
+
+            # Controles de Ejecución (Pausar/Reanudar)
+            col_btn, col_spacer = st.columns([1, 2])
+            with col_btn:
+                if st.session_state.batch_is_processing:
+                    if st.button("⏸️ Pausar", key="btn_batch_pause", type="secondary"):
+                        st.session_state.batch_is_processing = False
+                        st.rerun()
+                elif not st.session_state.batch_is_processing and 0 < st.session_state.batch_current_idx < n:
+                    if st.button("▶️ Reanudar", key="btn_batch_resume", type="primary"):
+                        st.session_state.batch_is_processing = True
+                        st.rerun()
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+            # -------------------------------------------------------------
+            # HISTORICAL RENDER: Mantiene visibles los videos ya procesados
+            # -------------------------------------------------------------
+            for idx, res in enumerate(st.session_state.batch_results):
+                vid_num = idx + 1
+                if res["Estado"].startswith("✅"):
+                    with st.status(f"✅ Video {vid_num} procesado con éxito", state="complete", expanded=False):
+                        st.write(f"Link: {res['URL']}")
+                        st.write(f"Archivo: {res['Archivo']}")
+                else:
+                    with st.status(f"❌ Video {vid_num} falló", state="error", expanded=False):
+                        st.write(f"Link: {res['URL']}")
+
+            # -------------------------------------------------------------
+            # EXECUTION LOGIC LOOP (Links Individuales)
+            # -------------------------------------------------------------
+            total = len(st.session_state.batch_urls)
+            if st.session_state.batch_is_processing:
+                try:
+                    scraper = OmniScraper()
+                except Exception as e:
+                    st.error(f"❌ Error de inicialización: {str(e)}")
+                    st.session_state.batch_is_processing = False
+                    st.rerun()
+
+                progress_bar = st.progress(st.session_state.batch_current_idx / total)
+
+                # Iterar desde el offset guardado
+                for idx in range(st.session_state.batch_current_idx, total):
+                    # Comprobación de estado persistente antes de cada vuelta
+                    if not st.session_state.batch_is_processing:
+                        st.stop()
+
+                    url = st.session_state.batch_urls[idx]
+                    current_num = idx + 1
+
+                    with st.status(f"Procesando video {current_num} de {total}...", expanded=True) as status:
+                        st.write(f"Link: {url}")
+                        try:
+                            output_path = scraper.process_video(url)
+                            if output_path:
+                                status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
+                                st.session_state.batch_results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
+                                st.session_state.batch_successful_files.append(output_path)
+                                st.session_state.batch_success_count += 1
+                            else:
+                                status.update(label=f"❌ Video {current_num} falló", state="error")
+                                st.session_state.batch_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                                st.session_state.batch_error_count += 1
+                        except Exception as e:
+                            status.update(label=f"❌ Error crítico en video {current_num}", state="error")
+                            st.error(str(e))
+                            st.session_state.batch_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                            st.session_state.batch_error_count += 1
+
+                    # Update Offset
+                    st.session_state.batch_current_idx = current_num
+
+                    # Update shared Live Metrics
+                    metric_total.metric("Total Procesados", current_num)
+                    metric_success.metric("Éxitos ✅", st.session_state.batch_success_count)
+                    metric_error.metric("Fallos ❌", st.session_state.batch_error_count)
+                    progress_bar.progress(current_num / total)
+
+                    if current_num < total:
+                        time.sleep(2)
+                        
+                # Bucle terminado
+                st.session_state.batch_is_processing = False
+                st.rerun()
+
+            # -------------------------------------------------------------
+            # SUMMARY & DOWNLOAD (Only shows when fully complete)
+            # -------------------------------------------------------------
+            if not st.session_state.batch_is_processing and st.session_state.batch_current_idx == total and total > 0:
+                st.markdown("### 📋 Resumen Final de Lote")
+                st.dataframe(st.session_state.batch_results, width="stretch")
+
+                if st.session_state.batch_successful_files:
+                    zip_data = create_zip_in_memory(st.session_state.batch_successful_files)
+                    st.success(f"🎉 ¡Extracción completada! Se generaron {len(st.session_state.batch_successful_files)} archivos.")
+                    st.download_button(
+                        label="📦 Descargar Paquete Completo (.zip)",
+                        data=zip_data,
+                        file_name="omniscribe_batch.zip",
+                        mime="application/zip",
+                        width="stretch"
+                    )
+                else:
+                    st.error("❌ No se pudo extraer ningún video en este lote.")
                 
     with tab2:
         playlist_url_input = st.text_input(
@@ -369,9 +464,14 @@ def main() -> None:
                         scraper = OmniScraper()
                         urls = scraper.get_playlist_videos(playlist_url_input.strip())
                         if urls:
+                            # Reset all states for the new playlist
                             st.session_state.playlist_urls = urls
                             st.session_state.current_idx = 0
                             st.session_state.is_processing = False
+                            st.session_state.playlist_results = []
+                            st.session_state.playlist_successful_files = []
+                            st.session_state.playlist_success_count = 0
+                            st.session_state.playlist_error_count = 0
                         else:
                             st.session_state.playlist_urls = []
                             st.warning("⚠️ No se encontraron videos en esta playlist o la URL no es válida.")
@@ -383,6 +483,11 @@ def main() -> None:
             n = len(st.session_state.playlist_urls)
             st.info(f"✅ Se han detectado {n} videos en esta lista de reproducción.")
             st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Sync Metrics to Current Global State
+            metric_total.metric("Total Procesados", st.session_state.current_idx)
+            metric_success.metric("Éxitos ✅", st.session_state.playlist_success_count)
+            metric_error.metric("Fallos ❌", st.session_state.playlist_error_count)
 
             # Controles de Ejecución
             col_btn, col_spacer = st.columns([1, 2])
@@ -402,7 +507,23 @@ def main() -> None:
 
             st.markdown("<hr>", unsafe_allow_html=True)
 
-            # Execution Logic Loop
+            # -------------------------------------------------------------
+            # HISTORICAL RENDER: Mantiene visibles los videos ya procesados
+            # -------------------------------------------------------------
+            for idx, res in enumerate(st.session_state.playlist_results):
+                vid_num = idx + 1
+                if res["Estado"].startswith("✅"):
+                    with st.status(f"✅ Video {vid_num} procesado con éxito", state="complete", expanded=False):
+                        st.write(f"Link: {res['URL']}")
+                        st.write(f"Archivo: {res['Archivo']}")
+                else:
+                    with st.status(f"❌ Video {vid_num} falló", state="error", expanded=False):
+                        st.write(f"Link: {res['URL']}")
+
+            # -------------------------------------------------------------
+            # EXECUTION LOGIC LOOP
+            # -------------------------------------------------------------
+            total = len(st.session_state.playlist_urls)
             if st.session_state.is_processing:
                 try:
                     scraper = OmniScraper()
@@ -411,12 +532,6 @@ def main() -> None:
                     st.session_state.is_processing = False
                     st.rerun()
 
-                results = []
-                successful_files = []
-                success_count = 0
-                error_count = 0
-
-                total = len(st.session_state.playlist_urls)
                 progress_bar = st.progress(st.session_state.current_idx / total)
 
                 # Iterar desde el offset guardado
@@ -434,26 +549,26 @@ def main() -> None:
                             output_path = scraper.process_video(url)
                             if output_path:
                                 status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
-                                results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
-                                successful_files.append(output_path)
-                                success_count += 1
+                                st.session_state.playlist_results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
+                                st.session_state.playlist_successful_files.append(output_path)
+                                st.session_state.playlist_success_count += 1
                             else:
                                 status.update(label=f"❌ Video {current_num} falló", state="error")
-                                results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                                error_count += 1
+                                st.session_state.playlist_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                                st.session_state.playlist_error_count += 1
                         except Exception as e:
                             status.update(label=f"❌ Error crítico en video {current_num}", state="error")
                             st.error(str(e))
-                            results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                            error_count += 1
+                            st.session_state.playlist_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                            st.session_state.playlist_error_count += 1
 
                     # Update Offset
                     st.session_state.current_idx = current_num
 
                     # Update shared Live Metrics
                     metric_total.metric("Total Procesados", current_num)
-                    metric_success.metric("Éxitos ✅", success_count)
-                    metric_error.metric("Fallos ❌", error_count)
+                    metric_success.metric("Éxitos ✅", st.session_state.playlist_success_count)
+                    metric_error.metric("Fallos ❌", st.session_state.playlist_error_count)
                     progress_bar.progress(current_num / total)
 
                     if current_num < total:
@@ -461,15 +576,18 @@ def main() -> None:
                         
                 # Bucle terminado
                 st.session_state.is_processing = False
-                st.session_state.current_idx = 0
+                st.rerun() # Rerun para asegurar el renderizado final de la UI
 
-                # Results Summary
-                st.markdown("### 📋 Resumen de Procesamiento")
-                st.dataframe(results, width="stretch")
+            # -------------------------------------------------------------
+            # SUMMARY & DOWNLOAD (Only shows when fully complete)
+            # -------------------------------------------------------------
+            if not st.session_state.is_processing and st.session_state.current_idx == total and total > 0:
+                st.markdown("### 📋 Resumen Final de la Playlist")
+                st.dataframe(st.session_state.playlist_results, width="stretch")
 
-                if successful_files:
-                    zip_data = create_zip_in_memory(successful_files)
-                    st.success(f"🎉 ¡Extracción completada! Se generaron {len(successful_files)} archivos.")
+                if st.session_state.playlist_successful_files:
+                    zip_data = create_zip_in_memory(st.session_state.playlist_successful_files)
+                    st.success(f"🎉 ¡Extracción completada! Se generaron {len(st.session_state.playlist_successful_files)} archivos.")
                     st.download_button(
                         label="📦 Descargar Paquete Completo (.zip)",
                         data=zip_data,

@@ -22,7 +22,7 @@ class OmniScraper:
     """
     
     def __init__(self, groq_api_key: Optional[str] = None) -> None:
-        self.api_key = groq_api_key or config.get_groq_api_key()
+        self.api_key = groq_api_key or app_config.get_groq_api_key()
         if not self.api_key:
             logger.warning("GROQ_API_KEY not found. Fallback transcription will be unavailable.")
         
