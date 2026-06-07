@@ -105,7 +105,7 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
 
 > Objetivo: corregir el fallo de producción. Todos los cambios en `scraper.py` y `app_config.py`.
 
-- [ ] **1.1 — Cookie loader: secret base64 → cookiefile temporal**
+- [X] **1.1 — Cookie loader: secret base64 → cookiefile temporal** ✅ *(2026-06-06: `app_config.get_youtube_cookiefile()` con singleton y fail-safe; 4 unit tests verdes)*
   - **Modelo:** Opus 4.8 · **Skills:** `security-review`, `verification-before-completion`, `test-driven-development`
   - En `app_config.py`, agregar `get_youtube_cookiefile() -> Optional[str]`:
     1. Leer env `YOUTUBE_COOKIES_B64`.
@@ -116,7 +116,7 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
   - ⚠️ Nota operativa (documentar en README): YouTube invalida cookies reusadas desde una IP distinta a la del navegador que las creó. Exportarlas idealmente de una cuenta descartable y re-exportar cuando reaparezcan bloqueos.
   - Test unitario: round-trip decode→write→path con un base64 fixture (sin red).
 
-- [ ] **1.2 — Builder centralizado `_base_ydl_opts()` en `OmniScraper`**
+- [X] **1.2 — Builder centralizado `_base_ydl_opts()` en `OmniScraper`** ✅ *(2026-06-06: los 3 dicts ad-hoc reemplazados; escape hatch `YTDLP_PLAYER_CLIENT` operativo; 4 unit tests verdes)*
   - **Modelo:** Opus 4.8 · **Skills:** `systematic-debugging`, `requesting-code-review`, `verification-before-completion`
   - Crear helper privado que retorne las opciones de hardening compartidas; los 3 dicts ad-hoc de `get_metadata`, `get_playlist_videos` y `_download_audio` parten de esta base + merge de extras por llamada:
     ```python
@@ -143,13 +143,13 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
   - Merges por llamada: `get_metadata` agrega `skip_download`, `noplaylist`; `get_playlist_videos` agrega `extract_flat: 'in_playlist'`, `noplaylist: False`; `_download_audio` agrega `format`, `outtmpl`, `postprocessors` y `ffmpeg_location` opcional.
   - Verificar: dry-run imprimiendo el dict resuelto; cookiefile presente solo con secret seteado.
 
-- [ ] **1.3 — Modernizar uso de youtube-transcript-api 1.2.4**
+- [X] **1.3 — Modernizar uso de youtube-transcript-api 1.2.4** ✅ *(2026-06-06: `IpBlocked` capturado en `list()`, `TranscriptsDisabled`/`NoTranscriptFound` explícitos, `_build_transcript_api()` con proxy opcional)*
   - **Modelo:** Opus 4.8 · **Skills:** `systematic-debugging`
   - **Bug fix principal:** envolver TODO el bloque `api.list(video_id)` + selección de transcript en try/except que capture `IpBlocked` (hoy solo se captura alrededor de `fetch()`, pero en cloud `list()` es la primera llamada bloqueada), más `TranscriptsDisabled`, `NoTranscriptFound` y excepciones de red genéricas → caer limpiamente al fallback de Groq en vez de que lo trague el handler externo sin contexto.
   - Soporte opcional de proxy: si env `YTT_PROXY_HTTP`/`YTT_PROXY_HTTPS` existen, construir `YouTubeTranscriptApi(proxy_config=GenericProxyConfig(http_url=..., https_url=...))` (import desde `youtube_transcript_api.proxies`).
   - ❌ NO intentar pasar cookies a esta librería: los maintainers de 1.x confirman que cookie-auth no está disponible. Postura realista: esta capa es best-effort; el workhorse confiable es yt-dlp+Groq.
 
-- [ ] **1.4 — Proteger `get_metadata` + corregir `_download_audio`**
+- [X] **1.4 — Proteger `get_metadata` + corregir `_download_audio`** ✅ *(2026-06-06: `errors.py` creado con la jerarquía completa de la 2.1 — a la 2.1 le queda solo el threading por `process_video` y el cambio de contrato; verificado con URL inexistente → `VideoUnavailableError` tipada, 0 huérfanos, 0 temp dirs)*
   - **Modelo:** Opus 4.8 · **Skills:** `systematic-debugging`, `verification-before-completion`
   - `get_metadata`: envolver `ydl.extract_info` para que `yt_dlp.utils.DownloadError`/bot-block levante una excepción tipada (clases de Fase 2.1) con video id y razón humana — es el "first-video failure point" documentado.
   - `_download_audio`:
@@ -158,11 +158,11 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
     - Mantener `.part` habilitado (permite resume) pero el `finally` debe limpiar `*.part`, `*.m4a`, `*.webm` del temp dir y borrar el dir completo.
   - Verificar: forzar fallo con URL inválida → no quedan huérfanos en `outputs/` y se levanta excepción tipada.
 
-- [ ] **1.5 — `_find_ffmpeg` cross-platform defensivo**
+- [X] **1.5 — `_find_ffmpeg` cross-platform defensivo** ✅ *(2026-06-07: log INFO con path de ffmpeg cuando está en PATH/WinGet; WARNING si no se encuentra; verificado en runtime)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `verification-before-completion`
   - Ya funciona en Linux (short-circuit con `shutil.which`); mantener fallback WinGet para dev local en Windows y agregar log claro indicando qué path se usa. Verificar en el contenedor que `which ffmpeg` resuelve (instalado vía `packages.txt`).
 
-- [ ] **1.6 — Jitter en los loops de UI**
+- [X] **1.6 — Jitter en los loops de UI** ✅ *(2026-06-07: `import random` agregado, 2x `time.sleep(random.uniform(2.0, 5.0))` en ambos loops; 0 `time.sleep(2)` fijos restantes)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `verification-before-completion`
   - En `app.py`, reemplazar los dos `time.sleep(2)` fijos (loops batch ~línea 425 y playlist ~línea 575) por `time.sleep(random.uniform(2.0, 5.0))` (+ `import random`). El throttling pesado a nivel red ya lo cubre 1.2 (`sleep_interval`/`max_sleep_interval`).
 

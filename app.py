@@ -1,5 +1,6 @@
 import streamlit as st
 import io
+import random
 import time
 import zipfile
 from pathlib import Path
@@ -422,7 +423,7 @@ def main() -> None:
                     progress_bar.progress(current_num / total)
 
                     if current_num < total:
-                        time.sleep(2)
+                        time.sleep(random.uniform(2.0, 5.0))
                         
                 # Bucle terminado
                 st.session_state.batch_is_processing = False
@@ -572,7 +573,7 @@ def main() -> None:
                     progress_bar.progress(current_num / total)
 
                     if current_num < total:
-                        time.sleep(2)
+                        time.sleep(random.uniform(2.0, 5.0))
                         
                 # Bucle terminado
                 st.session_state.is_processing = False
