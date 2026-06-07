@@ -5,6 +5,7 @@ import time
 import zipfile
 from pathlib import Path
 import app_config
+from errors import OmniScribeError
 from scraper import OmniScraper
 
 # App Configuration
@@ -224,6 +225,40 @@ def reset_all_inputs() -> None:
     st.session_state.batch_success_count = 0
     st.session_state.batch_error_count = 0
 
+def _process_video_to_result(scraper, url: str) -> dict:
+    """
+    Llama a process_video y devuelve un dict listo para guardar en session_state.
+
+    Claves públicas (visibles en st.dataframe): URL, Estado, Archivo, Motivo.
+    Clave interna: _path (path completo para el ZIP; no se muestra en la tabla).
+    """
+    try:
+        output_path = scraper.process_video(url)
+        return {
+            "URL": url,
+            "Estado": "✅ Éxito",
+            "Archivo": Path(output_path).name,
+            "Motivo": "",
+            "_path": output_path,
+        }
+    except OmniScribeError as e:
+        return {
+            "URL": url,
+            "Estado": f"❌ {e.short_label}",
+            "Archivo": "-",
+            "Motivo": e.message,
+            "_path": None,
+        }
+    except Exception as e:
+        return {
+            "URL": url,
+            "Estado": "❌ Error inesperado",
+            "Archivo": "-",
+            "Motivo": str(e),
+            "_path": None,
+        }
+
+
 def main() -> None:
     # --- Session State Initialization ---
     if 'playlist_urls' not in st.session_state:
@@ -368,8 +403,10 @@ def main() -> None:
                         st.write(f"Link: {res['URL']}")
                         st.write(f"Archivo: {res['Archivo']}")
                 else:
-                    with st.status(f"❌ Video {vid_num} falló", state="error", expanded=False):
+                    with st.status(f"Video {vid_num}: {res['Estado']}", state="error", expanded=False):
                         st.write(f"Link: {res['URL']}")
+                        if res.get("Motivo"):
+                            st.write(f"Motivo: {res['Motivo']}")
 
             # -------------------------------------------------------------
             # EXECUTION LOGIC LOOP (Links Individuales)
@@ -396,22 +433,16 @@ def main() -> None:
 
                     with st.status(f"Procesando video {current_num} de {total}...", expanded=True) as status:
                         st.write(f"Link: {url}")
-                        try:
-                            output_path = scraper.process_video(url)
-                            if output_path:
-                                status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
-                                st.session_state.batch_results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
-                                st.session_state.batch_successful_files.append(output_path)
-                                st.session_state.batch_success_count += 1
-                            else:
-                                status.update(label=f"❌ Video {current_num} falló", state="error")
-                                st.session_state.batch_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                                st.session_state.batch_error_count += 1
-                        except Exception as e:
-                            status.update(label=f"❌ Error crítico en video {current_num}", state="error")
-                            st.error(str(e))
-                            st.session_state.batch_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                        result = _process_video_to_result(scraper, url)
+                        if result["Estado"].startswith("✅"):
+                            status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
+                            st.session_state.batch_successful_files.append(result["_path"])
+                            st.session_state.batch_success_count += 1
+                        else:
+                            status.update(label=f"❌ Video {current_num}: {result['Estado'][2:]}", state="error")
+                            st.error(result["Motivo"])
                             st.session_state.batch_error_count += 1
+                        st.session_state.batch_results.append(result)
 
                     # Update Offset
                     st.session_state.batch_current_idx = current_num
@@ -434,7 +465,9 @@ def main() -> None:
             # -------------------------------------------------------------
             if not st.session_state.batch_is_processing and st.session_state.batch_current_idx == total and total > 0:
                 st.markdown("### 📋 Resumen Final de Lote")
-                st.dataframe(st.session_state.batch_results, width="stretch")
+                display_batch = [{k: v for k, v in r.items() if not k.startswith("_")}
+                                 for r in st.session_state.batch_results]
+                st.dataframe(display_batch, width="stretch")
 
                 if st.session_state.batch_successful_files:
                     zip_data = create_zip_in_memory(st.session_state.batch_successful_files)
@@ -518,8 +551,10 @@ def main() -> None:
                         st.write(f"Link: {res['URL']}")
                         st.write(f"Archivo: {res['Archivo']}")
                 else:
-                    with st.status(f"❌ Video {vid_num} falló", state="error", expanded=False):
+                    with st.status(f"Video {vid_num}: {res['Estado']}", state="error", expanded=False):
                         st.write(f"Link: {res['URL']}")
+                        if res.get("Motivo"):
+                            st.write(f"Motivo: {res['Motivo']}")
 
             # -------------------------------------------------------------
             # EXECUTION LOGIC LOOP
@@ -546,22 +581,16 @@ def main() -> None:
 
                     with st.status(f"Procesando video {current_num} de {total}...", expanded=True) as status:
                         st.write(f"Link: {url}")
-                        try:
-                            output_path = scraper.process_video(url)
-                            if output_path:
-                                status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
-                                st.session_state.playlist_results.append({"URL": url, "Estado": "✅ Éxito", "Archivo": Path(output_path).name})
-                                st.session_state.playlist_successful_files.append(output_path)
-                                st.session_state.playlist_success_count += 1
-                            else:
-                                status.update(label=f"❌ Video {current_num} falló", state="error")
-                                st.session_state.playlist_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
-                                st.session_state.playlist_error_count += 1
-                        except Exception as e:
-                            status.update(label=f"❌ Error crítico en video {current_num}", state="error")
-                            st.error(str(e))
-                            st.session_state.playlist_results.append({"URL": url, "Estado": "❌ Fallo", "Archivo": "-"})
+                        result = _process_video_to_result(scraper, url)
+                        if result["Estado"].startswith("✅"):
+                            status.update(label=f"✅ Video {current_num} procesado con éxito", state="complete")
+                            st.session_state.playlist_successful_files.append(result["_path"])
+                            st.session_state.playlist_success_count += 1
+                        else:
+                            status.update(label=f"❌ Video {current_num}: {result['Estado'][2:]}", state="error")
+                            st.error(result["Motivo"])
                             st.session_state.playlist_error_count += 1
+                        st.session_state.playlist_results.append(result)
 
                     # Update Offset
                     st.session_state.current_idx = current_num
@@ -584,7 +613,9 @@ def main() -> None:
             # -------------------------------------------------------------
             if not st.session_state.is_processing and st.session_state.current_idx == total and total > 0:
                 st.markdown("### 📋 Resumen Final de la Playlist")
-                st.dataframe(st.session_state.playlist_results, width="stretch")
+                display_playlist = [{k: v for k, v in r.items() if not k.startswith("_")}
+                                    for r in st.session_state.playlist_results]
+                st.dataframe(display_playlist, width="stretch")
 
                 if st.session_state.playlist_successful_files:
                     zip_data = create_zip_in_memory(st.session_state.playlist_successful_files)

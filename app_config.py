@@ -2,12 +2,102 @@ import base64
 import binascii
 import logging
 import os
+import re
 import tempfile
 from typing import Optional
 
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Fase 2.3 — Logging estructurado con redacción de secretos
+# ---------------------------------------------------------------------------
+class RedactionFilter(logging.Filter):
+    """
+    Redacta secretos (cookies, API keys de Groq, tokens de YouTube) antes de
+    que el record llegue al stream de salida.
+
+    SEGURIDAD — el filtro DEBE adjuntarse al HANDLER, no al logger: los filtros
+    a nivel logger no ven los records que propagan desde loggers hijos
+    (gotcha conocido de la stdlib de logging). configure_logging() lo garantiza.
+
+    Redacta tanto el mensaje como los argumentos de logging (logger.info("x %s",
+    secreto)) renderizando el mensaje final y reescribiéndolo en el record.
+    """
+    _PLACEHOLDER = "***REDACTED***"
+
+    _PATTERNS = (
+        # API keys de Groq (gsk_...).
+        (re.compile(r"gsk_[A-Za-z0-9]+"), "gsk_***REDACTED***"),
+        # Headers de auth: redacta el valor completo hasta fin de línea.
+        (re.compile(r"(?im)\b(Cookie|Authorization)\b\s*:\s*.+$"), r"\1: ***REDACTED***"),
+        # Cookies de sesión de YouTube en pares nombre=valor (Netscape/headers).
+        (re.compile(r"\b(SAPISID|APISID|HSID|SSID|SID|SIDCC|LOGIN_INFO)=[^\s;]+"),
+         r"\1=***REDACTED***"),
+        # Cookies __Secure-* y __Host-* (3PSID, 1PSID, etc.).
+        (re.compile(r"(__Secure-|__Host-)[\w-]*=[^\s;]+"), r"\1***REDACTED***"),
+    )
+
+    @classmethod
+    def redact(cls, text: str) -> str:
+        for pattern, repl in cls._PATTERNS:
+            text = pattern.sub(repl, text)
+        return text
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            # Un log mal formado no debe romper el pipeline ni filtrar el secreto:
+            # redactamos el template crudo como fallback conservador.
+            message = str(record.msg)
+        redacted = self.redact(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
+        return True  # nunca descartar records
+
+
+_LOGGING_CONFIGURED = False
+
+
+def configure_logging() -> None:
+    """
+    Configura el logging una sola vez para todo el proceso (Fase 2.3):
+    formatter con timestamp/nivel/nombre/mensaje, nivel desde env LOG_LEVEL
+    (default INFO) y RedactionFilter en TODOS los handlers de root.
+
+    Idempotente: seguro de llamar en cada rerun de Streamlit (no apila handlers).
+    """
+    global _LOGGING_CONFIGURED
+
+    load_dotenv(override=True)
+    level_name = (os.getenv("LOG_LEVEL") or "INFO").upper()
+    level = logging.getLevelName(level_name)
+    if not isinstance(level, int):  # getLevelName devuelve str para nombres inválidos
+        level = logging.INFO
+
+    root = logging.getLogger()
+
+    # Si root no tiene handlers (proceso fresco / CLI / pytest), instalamos el nuestro.
+    if not root.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+        ))
+        root.addHandler(handler)
+
+    # Garantía de seguridad: TODO handler (incluidos los preexistentes, p. ej. los
+    # que pueda instalar Streamlit) debe redactar. Añadir el filtro sin duplicar.
+    for h in root.handlers:
+        if not any(isinstance(f, RedactionFilter) for f in h.filters):
+            h.addFilter(RedactionFilter())
+        h.setLevel(level)
+
+    root.setLevel(level)
+    _LOGGING_CONFIGURED = True
 
 def get_groq_api_key():
     """
@@ -63,6 +153,9 @@ def get_youtube_cookiefile() -> Optional[str]:
         _cookie_cache["path"] = None
 
     return _cookie_cache["path"]
+
+# Configurar logging (con redacción de secretos) antes de cualquier log de la app.
+configure_logging()
 
 # Singleton variables for the app
 GROQ_API_KEY = get_groq_api_key()

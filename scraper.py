@@ -17,17 +17,21 @@ from youtube_transcript_api import (
     NoTranscriptFound,
 )
 from groq import Groq
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_not_exception_type
 
 from errors import (
     OmniScribeError,
     VideoBlockedError,
     VideoUnavailableError,
+    TranscriptUnavailableError,
     AudioDownloadError,
+    AudioTooLargeError,
+    GroqConfigError,
+    GroqTranscriptionError,
 )
 
-# Setup Logging (python-pro.md)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Logging centralizado en app_config (Fase 2.3): el import de app_config (arriba)
+# ya llamó a configure_logging() — formatter, LOG_LEVEL y redacción de secretos.
 logger = logging.getLogger(__name__)
 
 class OmniScraper:
@@ -204,6 +208,8 @@ class OmniScraper:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
+        # Fase 2.1: los errores de dominio (config, etc.) son terminales — no reintentar.
+        retry=retry_if_not_exception_type(OmniScribeError),
         reraise=True
     )
     def _transcribe_with_groq(self, audio_file: str) -> str:
@@ -212,7 +218,9 @@ class OmniScraper:
         (@api-patterns and @python-pro)
         """
         if not self.client:
-            raise Exception("Groq client is not configured.")
+            raise GroqConfigError(
+                "No hay GROQ_API_KEY configurada: el fallback de Whisper no está disponible."
+            )
             
         logger.info(f"Sending {audio_file} to Groq API...")
         with open(audio_file, "rb") as file:
@@ -221,7 +229,9 @@ class OmniScraper:
                 model="whisper-large-v3",
                 response_format="text"
             )
-        return str(response)
+        # Una respuesta None no debe convertirse en el string truthy "None":
+        # retornar "" para que el guard de TranscriptUnavailableError lo atrape.
+        return str(response) if response is not None else ""
 
     @staticmethod
     def _find_ffmpeg() -> Optional[str]:
@@ -291,6 +301,11 @@ class OmniScraper:
         Orchestrates the transcription workflow:
         1. Attempt official transcripts.
         2. Fallback to Audio Download + Groq Whisper.
+
+        Contrato (Fase 2.1): retorna el path del transcript guardado o LEVANTA
+        una OmniScribeError tipada con mensaje en español para la UI.
+        Excepción transitoria: el caso >25MB aún retorna None (la Fase 2.2
+        lo convierte en AudioTooLargeError) — por eso el tipo sigue Optional.
         """
         try:
             metadata = self.get_metadata(url)
@@ -359,9 +374,14 @@ class OmniScraper:
             # Attempt 2: Fallback (Audio + Groq)
             if not transcript_text:
                 if not self.client:
-                    logger.error("Groq API key missing, cannot use Whisper fallback.")
-                    return None
-                    
+                    # Fase 2.1: terminal explícito en vez de return None silencioso.
+                    raise GroqConfigError(
+                        "Este video no tiene transcript oficial utilizable y no hay "
+                        "GROQ_API_KEY configurada para el fallback de Whisper. "
+                        "Configura la key en los secrets del deploy para procesarlo.",
+                        url=clean_url, video_id=video_id,
+                    )
+
                 logger.info("Attempt 2: Falling back to Audio Download + Groq Whisper...")
 
                 # Fase 1.4: temp dir aislado FUERA de outputs/ — nada temporal
@@ -376,11 +396,24 @@ class OmniScraper:
                     max_size = 25 * 1024 * 1024
 
                     if file_size > max_size:
-                        logger.error(f"Archivo demasiado grande para la API de Groq: {file_size / (1024 * 1024):.2f} MB")
-                        return None
+                        size_mb = file_size / (1024 * 1024)
+                        logger.error(f"Audio demasiado grande para Groq: {size_mb:.2f} MB (límite: 25 MB)")
+                        raise AudioTooLargeError(
+                            f"El audio pesa {size_mb:.1f} MB y supera el límite de 25 MB de Groq Whisper. "
+                            "En Fase 5.1 se agregará chunking automático.",
+                            size_mb=size_mb, url=clean_url, video_id=video_id,
+                        )
 
-                    # Request transcription
-                    transcript_text = self._transcribe_with_groq(audio_file)
+                    # Request transcription (Fase 2.1: fallo de Groq -> error tipado)
+                    try:
+                        transcript_text = self._transcribe_with_groq(audio_file)
+                    except OmniScribeError:
+                        raise
+                    except Exception as e:
+                        raise GroqTranscriptionError(
+                            f"La transcripción con Groq Whisper falló tras los reintentos: {e}",
+                            url=clean_url, video_id=video_id,
+                        ) from e
 
                 finally:
                     # CLEANUP RULE (Fase 1.4): borrar el temp dir completo,
@@ -388,36 +421,50 @@ class OmniScraper:
                     shutil.rmtree(temp_dir, ignore_errors=True)
                     logger.info(f"Cleanup: Deleted temp dir {temp_dir}")
 
-            # Process and Save results
-            if transcript_text:
-                final_text = self._clean_text(transcript_text)
-                
-                # Clean title for filesystem safety
-                safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
-                file_name = f"{safe_title}_{video_id}.txt"
-                file_path = self.output_path / file_name
-                
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(final_text)
-                
-                logger.info(f"✅ Success! Transcript saved to: {file_path}")
-                return str(file_path)
+            # Process and Save results.
+            # El check de vacío va sobre el texto YA limpio: un transcript de puro
+            # ruido ([Música], timestamps) no debe producir un archivo vacío "exitoso".
+            final_text = self._clean_text(transcript_text) if transcript_text else ""
+            if not final_text:
+                # Fase 2.1: llegar acá sin texto es un fallo real, no un None silencioso.
+                raise TranscriptUnavailableError(
+                    "No se pudo obtener texto de transcripción para este video "
+                    "(transcript vacío tras agotar las dos vías).",
+                    url=clean_url, video_id=video_id,
+                )
 
-            return None
+            # Clean title for filesystem safety
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
+            file_name = f"{safe_title}_{video_id}.txt"
+            file_path = self.output_path / file_name
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(final_text)
+
+            logger.info(f"✅ Success! Transcript saved to: {file_path}")
+            return str(file_path)
 
         except OmniScribeError as e:
             # Errores tipados: propagar hacia la UI con su mensaje en español.
             logger.error(f"❌ {type(e).__name__} processing {url}: {e}")
             raise
         except Exception as e:
+            # Fase 2.1: errores desconocidos se envuelven con __cause__ en vez de
+            # tragarse con return None — la UI siempre recibe un motivo.
             logger.error(f"❌ Error processing {url}: {e}")
-            return None
+            raise OmniScribeError(
+                f"Error inesperado procesando el video: {e}", url=url
+            ) from e
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         scraper = OmniScraper()
-        result = scraper.process_video(sys.argv[1])
+        try:
+            result = scraper.process_video(sys.argv[1])
+        except OmniScribeError as e:
+            print(f"[{e.short_label}] {e.message}")
+            sys.exit(1)
         if result:
             print(f"Output generated at {result}")
         else:

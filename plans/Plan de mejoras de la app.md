@@ -172,22 +172,22 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
 
 > Objetivo: reemplazar los `except Exception → return None` silenciosos y el "❌ Error" sin contexto por errores tipados, logs estructurados y mensajes accionables.
 
-- [ ] **2.1 — Jerarquía de excepciones tipadas (`errors.py`)**
+- [X] **2.1 — Jerarquía de excepciones tipadas (`errors.py`)** ✅ *(2026-06-07: contrato "return path o raise tipado" implementado en `process_video`; `GroqConfigError`/`GroqTranscriptionError`/`TranscriptUnavailableError` hilados; tenacity con `retry_if_not_exception_type(OmniScribeError)` — errores de dominio no se reintentan; desconocidos envueltos con `__cause__`; code review aplicado: respuesta None de Groq y transcript solo-ruido ya no producen archivos basura; 11 unit tests en `test_fase2_unit.py`; único `return None` restante: caso 25MB, scope de 2.2)*
   - **Modelo:** Opus 4.8 · **Skills:** `systematic-debugging`, `requesting-code-review`
   - Nuevo módulo `errors.py`: `OmniScribeError(Exception)` base + `VideoBlockedError` (bot-block/IpBlocked), `TranscriptUnavailableError`, `AudioDownloadError`, `AudioTooLargeError` (lleva tamaño en MB), `GroqConfigError`, `GroqTranscriptionError`. Cada una con `url`/`video_id` y atributo `message` en español para la UI.
   - `process_video` cambia de contrato: de "return path o None" a "return path o raise tipado". El `except Exception` externo pasa a: re-raise de `OmniScribeError` conocidas; envolver desconocidas en `OmniScribeError` con `__cause__`. El special-case actual de `RuntimeError` se reemplaza por `VideoBlockedError`.
 
-- [ ] **2.2 — Límite 25MB de Groq con error explícito**
+- [X] **2.2 — Límite 25MB de Groq con error explícito** ✅ *(2026-06-07: `return None` silencioso → `raise AudioTooLargeError` con `size_mb` y mensaje accionable; `AudioTooLargeError` agregada al import de `scraper.py`; contrato "return path o raise tipado" ahora completo — ya no quedan `return None` de fallo)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `verification-before-completion`
   - Reemplazar el `return None` silencioso cuando `file_size > 25MB` por `raise AudioTooLargeError(video_id, size_mb)` con mensaje claro ("video demasiado largo para la vía gratuita de Whisper"). En Fase 5.1 este error se vuelve recuperable (chunking).
 
-- [ ] **2.3 — Logging estructurado con redacción de secretos**
+- [X] **2.3 — Logging estructurado con redacción de secretos** ✅ *(2026-06-07: `configure_logging()` centralizado en `app_config.py` — formatter timestamp/nivel/nombre/mensaje, `LOG_LEVEL` con fallback a INFO, idempotente; `basicConfig` suelto removido de `scraper.py`; `RedactionFilter` adjuntado al HANDLER —no al logger, por el gotcha de propagación de hijos— redacta `gsk_*`, `Cookie:`/`Authorization:`, tokens YouTube (SAPISID/APISID/HSID/SSID/SID/SIDCC/LOGIN_INFO) y `__Secure-/__Host-*`, también cuando van como arg de logging; auditoría de call-sites: ningún secreto se loguea directo, filtro cubre fuga indirecta vía excepciones de yt-dlp/Groq; 19 tests en `test_fase2_logging.py`)*
   - **Modelo:** Opus 4.8 · **Skills:** `security-review`, `test-driven-development`
   - Configurar el logger una vez en `app_config.py` (no `basicConfig` suelto en `scraper.py`): formatter con timestamp/nivel/nombre/mensaje, nivel desde env `LOG_LEVEL` (default INFO).
   - Agregar `logging.Filter` que redacte por regex: `Cookie:.*`, `Authorization:.*`, `gsk_[A-Za-z0-9]+` (keys de Groq), tokens de YouTube (`SAPISID`, `HSID`, `SSID`, `__Secure-`).
   - Test unitario: loggear cookie falsa y key `gsk_` falsa → assert que el record emitido sale redactado.
 
-- [ ] **2.4 — UI: motivo del fallo visible por video**
+- [X] **2.4 — UI: motivo del fallo visible por video** ✅ *(2026-06-07: helper `_process_video_to_result` extrae el try/except — `OmniScribeError` → `Estado="❌ {e.short_label}"` + `Motivo=e.message`; `Exception` genérica → `Motivo=str(e)`; `_path` interno excluido del `st.dataframe`; render histórico muestra Motivo; `st.error(result["Motivo"])` en el loop vivo; 9 tests en `test_fase2_ui.py`; 54/54 tests verdes)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `frontend-design`, `verification-before-completion`
   - En ambos loops de `app.py`: un solo `try/except OmniScribeError as e` que haga `status.update(label=f"❌ Video {n}: {e.short_label}", state="error")` + `st.error(e.message)`, y guarde el motivo en `batch_results`/`playlist_results` (nueva columna **"Motivo"**).
   - Los bloques de render histórico y el `st.dataframe` final muestran la columna Motivo.
