@@ -199,13 +199,13 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
 
 > Objetivo: deploy estable y gratuito con la cuota de Groq protegida. **3.1 debe estar antes de hacer público el Space.**
 
-- [ ] **3.1 — Password gate**
+- [X] **3.1 — Password gate** ✅ *(2026-06-07: `app_config.get_app_password()` + `password_is_valid()` con `hmac.compare_digest` sobre bytes UTF-8 —soporta acentos/ñ—; fail-closed verificado: sin APP_PASSWORD bloquea, `''`vs`''` no autentica (el guard gana sobre compare_digest); `check_password()` al inicio de `main()` + `st.stop()`; `authenticated` persiste en session_state; 13 tests en `test_fase3_auth.py`; 67/67 suite verde. SIN COMMIT — Fase 3 cierra tras 3.5)*
   - **Modelo:** Opus 4.8 · **Skills:** `security-review`, `verification-before-completion`
   - `check_password()` al inicio de `main()` en `app.py` (antes de renderizar tabs): `st.text_input("Contraseña", type="password")` comparado con env `APP_PASSWORD` (nueva `app_config.get_app_password()`) usando `hmac.compare_digest` (constant-time). Guardar `st.session_state["authenticated"] = True` y `st.stop()` hasta autenticar.
   - **Fail-closed:** si `APP_PASSWORD` no está seteada → mostrar "App no configurada" y bloquear (nunca abrir por defecto).
   - Verificar: password incorrecta bloquea; correcta persiste entre reruns de la sesión.
 
-- [ ] **3.2 — Frontmatter YAML de HF Spaces en `README.md`**
+- [X] **3.2 — Frontmatter YAML de HF Spaces en `README.md`** ✅ *(2026-06-07: prepend exacto al inicio del README; `sdk_version` como string entrecomillado para evitar que YAML lo interprete como float)*
   - **Modelo:** Sonnet 4.6 · **Skills:** —
   - Prepend exacto al inicio del README (el contenido existente queda debajo):
     ```yaml
@@ -221,18 +221,18 @@ La app "falla desde la descarga del primer video" en Streamlit Cloud porque **Yo
     ---
     ```
 
-- [ ] **3.3 — `load_dotenv(override=False)`**
+- [X] **3.3 — `load_dotenv(override=False)`** ✅ *(2026-06-07: 4 ocurrencias en `app_config.py` reemplazadas — `configure_logging`, `get_groq_api_key`, `get_youtube_cookiefile`, `get_app_password`; precedencia correcta: secrets del servidor ganan sobre `.env` local; 67/67 tests verdes)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `verification-before-completion`
   - En `app_config.py`, cambiar `load_dotenv(override=True)` → `override=False` para que los env vars reales del deploy (HF secrets) ganen sobre un `.env` accidental. Documentar que `.env` es solo para dev local.
   - Buena noticia ya verificada: `app_config` usa `os.getenv`, y HF inyecta Settings → "Variables and secrets" como env vars → `GROQ_API_KEY`, `APP_PASSWORD`, `YOUTUBE_COOKIES_B64`, `YTDLP_PLAYER_CLIENT`, `YTT_PROXY_*`, `LOG_LEVEL` funcionan sin más cambios de código.
 
-- [ ] **3.4 — Runbook de deploy en HF Spaces (README)**
+- [X] **3.4 — Runbook de deploy en HF Spaces (README)** ✅ *(2026-06-07: sección "Deploy a Hugging Face Spaces" agregada al README — 5 pasos (crear Space, conectar repo, secrets, packages.txt, exportar cookies) + tabla de caveats del free tier)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `verification-before-completion`
   - Documentar: crear Space (SDK Streamlit), conectar repo/push, configurar secrets en Settings → Variables and secrets, `packages.txt` con `ffmpeg` ya es compatible (HF instala apt packages nativamente).
   - Caveats a documentar: `outputs/` es **efímero** (se pierde en rebuild/restart — aceptable porque el zip se descarga en sesión); free tier = 16GB RAM sin disco persistente; el Space duerme tras 48h sin uso; refresh del browser pierde el estado de un run largo (motivación de 5.3); renovar `YOUTUBE_COOKIES_B64` cada ~2-4 semanas o cuando reaparezcan bloqueos.
   - Incluir instrucciones de exportación de cookies (extensión "Get cookies.txt LOCALLY" o similar → `base64 -w0 cookies.txt`).
 
-- [ ] **3.5 — Neutralizar flags inseguros del devcontainer**
+- [X] **3.5 — Neutralizar flags inseguros del devcontainer** ✅ *(2026-06-07: comentario `// DEV-ONLY` explícito en `devcontainer.json` — los flags quedan para el preview de Codespaces pero documentados; HF Spaces ignora este archivo)*
   - **Modelo:** Sonnet 4.6 · **Skills:** `security-review`
   - `.devcontainer/devcontainer.json` corre Streamlit con `--server.enableCORS false --server.enableXsrfProtection false`. HF lo ignora, pero es un smell para Codespaces: quitar los flags o comentar explícitamente que es dev-only.
 

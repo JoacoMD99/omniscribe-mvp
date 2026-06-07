@@ -259,7 +259,43 @@ def _process_video_to_result(scraper, url: str) -> dict:
         }
 
 
+def check_password() -> bool:
+    """
+    Gate de acceso por contraseña (Fase 3.1). Devuelve True solo si la sesión
+    está autenticada; mientras tanto renderiza el formulario de login.
+
+    Fail-closed: sin APP_PASSWORD configurada en el entorno, bloquea el acceso
+    y muestra un aviso (la app NUNCA se abre por defecto). La comparación es de
+    tiempo constante (app_config.password_is_valid → hmac.compare_digest).
+    """
+    if st.session_state.get("authenticated"):
+        return True
+
+    expected = app_config.get_app_password()
+    if not expected:
+        st.error(
+            "🔒 App no configurada: falta la variable **APP_PASSWORD** en el "
+            "servidor. Contactá al administrador."
+        )
+        return False
+
+    st.markdown("## 🔒 Acceso restringido")
+    st.markdown("Ingresá la contraseña del equipo para usar **OmniScribe AI**.")
+    provided = st.text_input("Contraseña", type="password", key="password_input")
+    if st.button("Ingresar", type="primary", key="btn_login"):
+        if app_config.password_is_valid(provided, expected):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("❌ Contraseña incorrecta.")
+    return False
+
+
 def main() -> None:
+    # --- Password Gate (Fase 3.1): nada se renderiza sin autenticar ---
+    if not check_password():
+        st.stop()
+
     # --- Session State Initialization ---
     if 'playlist_urls' not in st.session_state:
         st.session_state.playlist_urls = []

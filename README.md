@@ -1,3 +1,14 @@
+---
+title: OmniScribe AI
+emoji: 🤖
+colorFrom: indigo
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.55.0"
+app_file: app.py
+pinned: false
+---
+
 # OmniScribe AI | Knowledge Engine 🤖
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -61,6 +72,82 @@ Create a `.env` file in the root directory and add your Groq API key (optional b
 ```env
 GROQ_API_KEY=gsk_your_api_key_here
 ```
+
+---
+
+## 🚀 Deploy a Hugging Face Spaces
+
+> **Prerequisitos:** cuenta gratuita en [huggingface.co](https://huggingface.co) + repositorio de GitHub con el código.
+
+### 1. Crear el Space
+
+1. Ir a **huggingface.co → New Space**.
+2. Nombre: `omniscribe-ai` (o el que prefieras).
+3. **SDK → Streamlit** · Hardware → **CPU basic · Free**.
+4. Visibilidad → **Private** (recomendado mientras usás `APP_PASSWORD`).
+5. Click **Create Space**.
+
+### 2. Conectar el repositorio de GitHub
+
+En la pestaña **Files** del Space → **Connect a GitHub repository** (o clonar directamente).  
+Alternativamente, agregar HF como remote y hacer push:
+
+```bash
+# Reemplazá TU_USUARIO y TU_SPACE_NAME con los reales
+git remote add hf https://huggingface.co/spaces/TU_USUARIO/TU_SPACE_NAME
+git push hf main
+```
+
+Cada `git push hf main` rebuildeará el Space automáticamente.
+
+### 3. Configurar los secrets (Settings → Variables and secrets)
+
+En la pestaña **Settings** del Space → sección **Variables and secrets**:
+
+| Variable | Descripción | Requerida |
+|---|---|---|
+| `GROQ_API_KEY` | API key de Groq Cloud (console.groq.com) | ✅ Sí |
+| `APP_PASSWORD` | Contraseña del equipo para el login | ✅ Sí |
+| `YOUTUBE_COOKIES_B64` | Cookies de YouTube en base64 (ver abajo) | Recomendada |
+| `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` (default: INFO) | No |
+| `YTDLP_PLAYER_CLIENT` | Fallback de player client para yt-dlp (ej. `tv,android_vr`) | No |
+
+> ⚠️ Los secrets se inyectan como variables de entorno. **Nunca** pongas credenciales en el código ni en archivos commiteados.
+
+### 4. `packages.txt` — ffmpeg
+
+El archivo `packages.txt` ya está en el repo con el contenido:
+```
+ffmpeg
+```
+HF Spaces instala automáticamente los paquetes de `packages.txt` vía `apt` en cada build. No hace falta configuración adicional.
+
+### 5. Exportar cookies de YouTube (YOUTUBE_COOKIES_B64)
+
+Las cookies permiten que `yt-dlp` sortee los bloqueos anti-bot de YouTube en IPs de datacenter.
+
+**Paso a paso:**
+
+1. Instalar la extensión **"Get cookies.txt LOCALLY"** en Chrome/Firefox.
+2. Loguearse en YouTube con una **cuenta secundaria/descartable** (no usar cuenta principal — YouTube puede marcar el uso automatizado).
+3. Abrir `youtube.com`, clic en la extensión → **Export cookies** → guardar como `cookies.txt`.
+4. Codificar en base64:
+   - **PowerShell (Windows):** `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cookies.txt")) | Set-Clipboard`
+   - **Linux/macOS:** `base64 -w0 cookies.txt | pbcopy` (macOS) o `base64 -w0 cookies.txt | xclip`
+5. Pegar el resultado en la variable `YOUTUBE_COOKIES_B64` del Space.
+
+> 🔄 **Renovar cada 2-4 semanas** o cuando reaparezcan bloqueos frecuentes. YouTube invalida cookies usadas desde IPs distintas a la del navegador original.
+
+---
+
+### Caveats importantes del free tier
+
+| Caveat | Detalle |
+|---|---|
+| **Storage efímero** | El directorio `outputs/` se borra en cada restart/rebuild. Los transcripts se deben descargar vía el botón ZIP antes de cerrar la sesión. |
+| **Sleep tras 48h** | El Space se "duerme" si no recibe tráfico en 48h. Al primera visita se despierta automáticamente (~30-60s de cold start). |
+| **Sin disco persistente** | El free tier no tiene volúmenes persistentes. Para guardar historial entre sesiones, usar la funcionalidad de descarga ZIP inmediata. |
+| **Refresh pierde el estado** | Refrescar el browser durante un run largo resetea la UI (el proceso de yt-dlp en el servidor sigue corriendo pero se pierde el seguimiento visual). Descargar el ZIP antes de cerrar. |
 
 ---
 
